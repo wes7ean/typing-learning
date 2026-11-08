@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<script>const YT_API_KEY = 'AIzaSyCwVe0VyY5vvX35mbuiOIGu49R07TeJmno'; // <<<<< TROQUE AQUI, SÓ O TEXTO ENTRE AS ASPAS</script>
+<script src="config.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Typing Learning</title>
 <style>
@@ -14,8 +14,10 @@
   main { max-width: 760px; margin: 24px auto; padding: 0 16px; }
   .card { background: #fff; border-radius: 14px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,.07); }
   input[type=text] { width: 100%; padding: 12px; font-size: 16px; border: 2px solid #d1d5db; border-radius: 10px; }
+  select { padding: 8px; font-size: 16px; border-radius: 8px; }
   button { background: #4f46e5; color: #fff; border: 0; padding: 12px 18px; border-radius: 10px; font-size: 16px; cursor: pointer; margin-top: 10px; margin-right: 8px; }
   button:hover { background: #4338ca; }
+  button.sec { background: #6b7280; }
   .result { display: flex; gap: 12px; padding: 10px; border-radius: 10px; cursor: pointer; align-items: center; }
   .result:hover { background: #eef2ff; }
   .result img { width: 120px; border-radius: 8px; }
@@ -33,6 +35,15 @@
   #lock h2 { color: #dc2626; }
   .hidden { display: none; }
   .hint { color: #6b7280; font-size: 14px; margin-top: 8px; }
+
+  /* ===== CASINHAS DE LETRAS ===== */
+  .slotwrap { position: relative; margin-top: 8px; min-height: 60px; }
+  .slotwrap input[type=text] { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; font-size: 16px; border: 0; padding: 0; }
+  #slots { display: flex; flex-wrap: wrap; gap: 14px 22px; padding: 8px 0; }
+  .word { display: flex; gap: 5px; }
+  .slot { width: 24px; height: 36px; border-bottom: 3px solid #9ca3af; text-align: center; font-size: 24px; font-weight: 700; line-height: 34px; text-transform: uppercase; color: #1f2937; }
+  .slot.cur { border-bottom-color: #4f46e5; animation: blink 1s infinite; }
+  @keyframes blink { 50% { border-bottom-color: #c7d2fe; } }
 </style>
 </head>
 <body>
@@ -52,6 +63,15 @@
     <div class="card">
       <input type="text" id="q" placeholder="Pesquise um vídeo ou música em inglês...">
       <button onclick="searchVideos()">Pesquisar</button>
+      <div class="hint">
+        Palavras por trecho:
+        <select id="wpc">
+          <option value="4">4</option>
+          <option value="6" selected>6</option>
+          <option value="8">8</option>
+          <option value="10">10</option>
+        </select>
+      </div>
       <div class="hint">Dica: escolha vídeos que tenham legenda em inglês.</div>
       <div id="results"></div>
     </div>
@@ -60,8 +80,13 @@
       <div id="player"></div>
       <div id="msg"></div>
       <div id="typeBox" class="hidden">
-        <input type="text" id="answer" placeholder="Digite o que você entendeu..." autocomplete="off">
+        <div class="slotwrap">
+          <div id="slots"></div>
+          <input type="text" id="answer" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+        </div>
+        <div class="hint">Digite só as letras, sem espaço. Toque nos tracinhos se o teclado não abrir.</div>
         <button onclick="checkAnswer()">Enviar</button>
+        <button class="sec" onclick="playChunk()">Ouvir de novo</button>
       </div>
     </div>
   </div>
@@ -70,9 +95,9 @@
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
 const TRANSCRIPT_API = '/api/transcript?videoId=';
-const MAX_LIVES = 5, LOCK_HOURS = 4, SEGMENT_SECONDS = 5;
+const MAX_LIVES = 5, LOCK_HOURS = 4;
 
-let player, transcript = [], segIndex = 0, pauseTimer = null;
+let player, transcript = [], chunks = [], chunkIndex = 0, watcher = null, expectedWords = [];
 let lives = parseInt(localStorage.getItem('lives') ?? MAX_LIVES);
 const isPremium = () => localStorage.getItem('premium') === '1';
 
@@ -110,6 +135,7 @@ function loseLife() {
   lives--; localStorage.setItem('lives', lives); renderHearts();
   if (lives <= 0) {
     localStorage.setItem('lockUntil', Date.now() + LOCK_HOURS * 3600000);
+    clearInterval(watcher);
     if (player && player.pauseVideo) player.pauseVideo();
     checkLock();
   }
@@ -125,8 +151,9 @@ function buyPremium() {
 async function searchVideos() {
   const q = document.getElementById('q').value.trim();
   if (!q) return;
-  const url = 'https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=8&q=' + encodeURIComponent(q) + '&key=' + YT_API_KEY;
   const box = document.getElementById('results');
+  if (typeof YT_API_KEY === 'undefined') { box.innerHTML = 'Falta o arquivo config.js com a chave do Google.'; return; }
+  const url = 'https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=8&q=' + encodeURIComponent(q) + '&key=' + YT_API_KEY;
   box.innerHTML = 'Pesquisando...';
   try {
     const res = await fetch(url);
@@ -143,7 +170,38 @@ async function searchVideos() {
   } catch (e) { box.innerHTML = 'Erro de conexão.'; }
 }
 
+/* ===== TRECHOS POR QUANTIDADE DE PALAVRAS ===== */
+function buildChunks(n) {
+  const words = [];
+  transcript.forEach((c, idx) => {
+    const w = c.text.split(' ').filter(Boolean);
+    if (!w.length) return;
+    let d = c.dur;
+    const next = transcript[idx + 1];
+    if (next && next.start > c.start) d = Math.min(d, next.start - c.start);
+    if (!(d > 0)) d = 1;
+    w.forEach((word, i) => words.push({
+      word: word,
+      start: c.start + (i / w.length) * d,
+      end: c.start + ((i + 1) / w.length) * d
+    }));
+  });
+  chunks = [];
+  for (let i = 0; i < words.length; i += n) {
+    const g = words.slice(i, i + n);
+    const text = g.map(x => x.word).join(' ');
+    if (g.length < 3 && chunks.length) {
+      const p = chunks[chunks.length - 1];
+      p.text += ' ' + text;
+      p.end = g[g.length - 1].end;
+      continue;
+    }
+    chunks.push({ start: g[0].start, end: g[g.length - 1].end, text: text });
+  }
+}
+
 async function chooseVideo(id) {
+  clearInterval(watcher);
   document.getElementById('playCard').classList.remove('hidden');
   document.getElementById('typeBox').classList.add('hidden');
   setMsg('Carregando transcrição...', '');
@@ -152,54 +210,88 @@ async function chooseVideo(id) {
     transcript = await res.json();
   } catch (e) { transcript = []; }
   if (!transcript.length) { setMsg('Este vídeo não tem transcrição em inglês disponível. Escolha outro.', 'bad'); return; }
-  segIndex = 0;
+  buildChunks(parseInt(document.getElementById('wpc').value));
+  if (!chunks.length) { setMsg('Não deu para montar os trechos deste vídeo. Escolha outro.', 'bad'); return; }
+  chunkIndex = 0;
   document.getElementById('player').outerHTML = '<div id="player"></div>';
   player = new YT.Player('player', {
     videoId: id,
     playerVars: { controls: 0, rel: 0 },
-    events: { onReady: () => playSegment() }
+    events: { onReady: () => playChunk() }
   });
 }
-function transcriptBetween(a, b) {
-  return transcript.filter(t => t.start >= a && t.start < b).map(t => t.text).join(' ').trim();
-}
-function playSegment() {
-  const last = transcript[transcript.length - 1].start;
-  let start = segIndex * SEGMENT_SECONDS;
-  let expected = transcriptBetween(start, start + SEGMENT_SECONDS);
-  while (!expected && start <= last) { segIndex++; start = segIndex * SEGMENT_SECONDS; expected = transcriptBetween(start, start + SEGMENT_SECONDS); }
-  if (!expected) { setMsg('Fim do vídeo! 🎉', 'ok'); document.getElementById('typeBox').classList.add('hidden'); return; }
+
+function playChunk() {
+  clearInterval(watcher);
+  if (chunkIndex >= chunks.length) {
+    setMsg('Fim do vídeo! 🎉', 'ok');
+    document.getElementById('typeBox').classList.add('hidden');
+    return;
+  }
+  const ch = chunks[chunkIndex];
   document.getElementById('typeBox').classList.add('hidden');
   setMsg('', '');
-  player.seekTo(start, true);
+  player.seekTo(Math.max(ch.start - 0.3, 0), true);
   player.playVideo();
-  clearTimeout(pauseTimer);
-  pauseTimer = setTimeout(() => {
-    player.pauseVideo();
-    document.getElementById('typeBox').classList.remove('hidden');
-    const a = document.getElementById('answer'); a.value = ''; a.focus();
-  }, SEGMENT_SECONDS * 1000);
+  const t0 = Date.now();
+  watcher = setInterval(() => {
+    if (Date.now() - t0 > 700 && player.getCurrentTime() >= ch.end + 0.3) {
+      clearInterval(watcher);
+      player.pauseVideo();
+      document.getElementById('typeBox').classList.remove('hidden');
+      setupSlots(ch.text);
+    }
+  }, 150);
 }
 
+/* ===== CASINHAS DE LETRAS ===== */
 const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/['’‘`]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+
+function setupSlots(text) {
+  expectedWords = norm(text).split(' ').filter(Boolean);
+  const a = document.getElementById('answer');
+  a.value = '';
+  renderSlots();
+  a.focus();
+}
+function renderSlots() {
+  const typed = document.getElementById('answer').value;
+  let k = 0, html = '';
+  expectedWords.forEach(w => {
+    html += '<div class="word">';
+    for (let i = 0; i < w.length; i++) {
+      const c = typed[k] || '';
+      html += '<div class="slot' + (k === typed.length ? ' cur' : '') + '">' + c + '</div>';
+      k++;
+    }
+    html += '</div>';
+  });
+  document.getElementById('slots').innerHTML = html;
+}
+document.getElementById('answer').addEventListener('input', e => {
+  const total = expectedWords.join('').length;
+  e.target.value = e.target.value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '').slice(0, total);
+  renderSlots();
+});
+
+/* ===== CONFERÊNCIA ===== */
 function checkAnswer() {
-  const start = segIndex * SEGMENT_SECONDS;
-  const expectedRaw = transcriptBetween(start, start + SEGMENT_SECONDS);
-  const expected = norm(expectedRaw);
-  const typed = norm(document.getElementById('answer').value);
+  const ch = chunks[chunkIndex];
+  const typed = document.getElementById('answer').value;
+  const expected = expectedWords.join('');
   document.getElementById('typeBox').classList.add('hidden');
   if (typed === expected) {
     setMsg('Congratulations! 🎉', 'ok');
     const m = document.getElementById('msg'); m.classList.add('pop'); confetti();
-    segIndex++;
-    setTimeout(() => { m.classList.remove('pop'); playSegment(); }, 1800);
+    chunkIndex++;
+    setTimeout(() => { m.classList.remove('pop'); playChunk(); }, 1800);
   } else {
-    setMsg('Errou! O correto era: ' + expectedRaw, 'bad');
+    setMsg('Errou! O correto era: ' + ch.text, 'bad');
     const c = document.getElementById('playCard'); c.classList.add('shake');
     setTimeout(() => c.classList.remove('shake'), 400);
     loseLife();
-    segIndex++;
-    setTimeout(() => { if (!checkLock()) playSegment(); }, 3500);
+    chunkIndex++;
+    setTimeout(() => { if (!checkLock()) playChunk(); }, 3500);
   }
 }
 function setMsg(t, cls) { const m = document.getElementById('msg'); m.textContent = t; m.className = cls; }
