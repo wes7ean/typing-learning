@@ -2,6 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
+<script>const YT_API_KEY = 'AIzaSyCwVe0VyY5vvX35mbuiOIGu49R07TeJmno'; // <<<<< TROQUE AQUI, SÓ O TEXTO ENTRE AS ASPAS</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Typing Learning</title>
 <style>
@@ -15,7 +16,6 @@
   input[type=text] { width: 100%; padding: 12px; font-size: 16px; border: 2px solid #d1d5db; border-radius: 10px; }
   button { background: #4f46e5; color: #fff; border: 0; padding: 12px 18px; border-radius: 10px; font-size: 16px; cursor: pointer; margin-top: 10px; margin-right: 8px; }
   button:hover { background: #4338ca; }
-  button.sec { background: #6b7280; }
   .result { display: flex; gap: 12px; padding: 10px; border-radius: 10px; cursor: pointer; align-items: center; }
   .result:hover { background: #eef2ff; }
   .result img { width: 120px; border-radius: 8px; }
@@ -69,17 +69,13 @@
 
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
-/* ===== CONFIGURAÇÃO ===== */
-const YT_API_KEY = 'AIzaSyCwVe0VyY5vvX35mbuiOIGu49R07TeJmno';
 const TRANSCRIPT_API = '/api/transcript?videoId=';
 const MAX_LIVES = 5, LOCK_HOURS = 4, SEGMENT_SECONDS = 5;
 
-/* ===== ESTADO ===== */
 let player, transcript = [], segIndex = 0, pauseTimer = null;
 let lives = parseInt(localStorage.getItem('lives') ?? MAX_LIVES);
 const isPremium = () => localStorage.getItem('premium') === '1';
 
-/* ===== CORAÇÕES E BLOQUEIO ===== */
 function renderHearts() {
   const el = document.getElementById('hearts');
   if (isPremium()) { el.textContent = '❤️ ∞'; return; }
@@ -119,7 +115,6 @@ function loseLife() {
   }
 }
 function buyPremium() {
-  // Pagamento ainda simulado. Depois ligamos um pagamento real.
   if (confirm('Simulação: confirmar compra de R$ 34,90?')) {
     localStorage.setItem('premium', '1');
     localStorage.removeItem('lockUntil');
@@ -127,7 +122,6 @@ function buyPremium() {
   }
 }
 
-/* ===== BUSCA ===== */
 async function searchVideos() {
   const q = document.getElementById('q').value.trim();
   if (!q) return;
@@ -149,7 +143,6 @@ async function searchVideos() {
   } catch (e) { box.innerHTML = 'Erro de conexão.'; }
 }
 
-/* ===== VÍDEO E TRANSCRIÇÃO ===== */
 async function chooseVideo(id) {
   document.getElementById('playCard').classList.remove('hidden');
   document.getElementById('typeBox').classList.add('hidden');
@@ -188,8 +181,7 @@ function playSegment() {
   }, SEGMENT_SECONDS * 1000);
 }
 
-/* ===== CONFERÊNCIA ===== */
-const norm = s => s.toLowerCase().replace(/[^a-z0-9' ]/g, '').replace(/\s+/g, ' ').trim();
+const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/['’‘`]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
 function checkAnswer() {
   const start = segIndex * SEGMENT_SECONDS;
   const expectedRaw = transcriptBetween(start, start + SEGMENT_SECONDS);
