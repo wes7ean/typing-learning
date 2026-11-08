@@ -1,3 +1,13 @@
+const clean = t => String(t)
+  .replace(/&amp;/g, '&')
+  .replace(/&#39;|&apos;/g, "'")
+  .replace(/&quot;/g, '"')
+  .replace(/\[[^\]]*\]|\([^)]*\)/g, ' ')
+  .replace(/[♪♫♬♩]/g, ' ')
+  .replace(/>>/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
 module.exports = async (req, res) => {
   const videoId = req.query.videoId;
   if (!videoId) { res.status(400).json([]); return; }
@@ -12,11 +22,13 @@ module.exports = async (req, res) => {
       res.status(200).json([]);
       return;
     }
-    const out = data.content.map(i => ({
-      start: i.offset / 1000,
-      dur: i.duration / 1000,
-      text: String(i.text).replace(/\n/g, ' ')
-    }));
+    const out = data.content
+      .map(i => ({
+        start: i.offset / 1000,
+        dur: i.duration / 1000,
+        text: clean(i.text)
+      }))
+      .filter(i => i.text);
     res.setHeader('Cache-Control', 's-maxage=86400');
     res.status(200).json(out);
   } catch (e) {
