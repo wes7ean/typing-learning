@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Typing Learning</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, Arial, sans-serif; background: #f4f6fb; color: #1f2937; }
+  header { background: #4f46e5; color: #fff; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+  header h1 { margin: 0; font-size: 22px; }
+  #hearts { font-size: 26px; letter-spacing: 4px; }
+  main { max-width: 760px; margin: 24px auto; padding: 0 16px; }
+  .card { background: #fff; border-radius: 14px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,.07); }
+  input[type=text] { width: 100%; padding: 12px; font-size: 16px; border: 2px solid #d1d5db; border-radius: 10px; }
+  button { background: #4f46e5; color: #fff; border: 0; padding: 12px 18px; border-radius: 10px; font-size: 16px; cursor: pointer; margin-top: 10px; margin-right: 8px; }
+  button:hover { background: #4338ca; }
+  button.sec { background: #6b7280; }
+  .result { display: flex; gap: 12px; padding: 10px; border-radius: 10px; cursor: pointer; align-items: center; }
+  .result:hover { background: #eef2ff; }
+  .result img { width: 120px; border-radius: 8px; }
+  #player { width: 100%; aspect-ratio: 16/9; }
+  #msg { font-size: 20px; text-align: center; min-height: 32px; margin-top: 12px; font-weight: 600; }
+  .ok { color: #16a34a; }
+  .bad { color: #dc2626; }
+  .shake { animation: shake .4s; }
+  @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-10px)} 75%{transform:translateX(10px)} }
+  .pop { animation: pop .5s; }
+  @keyframes pop { 0%{transform:scale(.6);opacity:0} 60%{transform:scale(1.2)} 100%{transform:scale(1);opacity:1} }
+  .confetti { position: fixed; top: -10px; width: 10px; height: 14px; z-index: 99; animation: fall 1.6s linear forwards; }
+  @keyframes fall { to { transform: translateY(105vh) rotate(540deg); opacity: .6; } }
+  #lock { display: none; text-align: center; }
+  #lock h2 { color: #dc2626; }
+  .hidden { display: none; }
+  .hint { color: #6b7280; font-size: 14px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Typing Learning</h1>
+  <div id="hearts"></div>
+</header>
+
+<main>
+  <div class="card" id="lock">
+    <h2>Seus corações acabaram</h2>
+    <p>Você poderá jogar de novo em <b id="countdown"></b>.</p>
+    <button onclick="buyPremium()">Vidas infinitas por R$ 34,90 (compra única)</button>
+  </div>
+
+  <div id="game">
+    <div class="card">
+      <input type="text" id="q" placeholder="Pesquise um vídeo ou música em inglês...">
+      <button onclick="searchVideos()">Pesquisar</button>
+      <div class="hint">Dica: escolha vídeos que tenham legenda em inglês.</div>
+      <div id="results"></div>
+    </div>
+
+    <div class="card hidden" id="playCard">
+      <div id="player"></div>
+      <div id="msg"></div>
+      <div id="typeBox" class="hidden">
+        <input type="text" id="answer" placeholder="Digite o que você entendeu..." autocomplete="off">
+        <button onclick="checkAnswer()">Enviar</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script src="https://www.youtube.com/iframe_api"></script>
+<script>
+/* ===== CONFIGURAÇÃO ===== */
+const YT_API_KEY = 'AIzaSyCwVe0VyY5vvX35mbuiOIGu49R07TeJmno';
+const TRANSCRIPT_API = '/api/transcript?videoId=';
+const MAX_LIVES = 5, LOCK_HOURS = 4, SEGMENT_SECONDS = 5;
+
+/* ===== ESTADO ===== */
+let player, transcript = [], segIndex = 0, pauseTimer = null;
+let lives = parseInt(localStorage.getItem('lives') ?? MAX_LIVES);
+const isPremium = () => localStorage.getItem('premium') === '1';
+
+/* ===== CORAÇÕES E BLOQUEIO ===== */
+function renderHearts() {
+  const el = document.getElementById('hearts');
+  if (isPremium()) { el.textContent = '❤️ ∞'; return; }
+  const l = Math.max(lives, 0);
+  el.textContent = '❤️'.repeat(l) + '🖤'.repeat(MAX_LIVES - l);
+}
+function checkLock() {
+  const until = parseInt(localStorage.getItem('lockUntil') || 0);
+  if (!isPremium() && until > Date.now()) {
+    document.getElementById('lock').style.display = 'block';
+    document.getElementById('game').classList.add('hidden');
+    const tick = () => {
+      const left = until - Date.now();
+      if (left <= 0) { unlock(); return; }
+      const h = Math.floor(left / 3600000), m = Math.floor(left % 3600000 / 60000), s = Math.floor(left % 60000 / 1000);
+      document.getElementById('countdown').textContent = h + 'h ' + m + 'min ' + s + 's';
+      setTimeout(tick, 1000);
+    };
+    tick();
+    return true;
+  }
+  if (until && until <= Date.now()) unlock();
+  return false;
+}
+function unlock() {
+  localStorage.removeItem('lockUntil');
+  localStorage.setItem('lives', MAX_LIVES);
+  location.reload();
+}
+function loseLife() {
+  if (isPremium()) return;
+  lives--; localStorage.setItem('lives', lives); renderHearts();
+  if (lives <= 0) {
+    localStorage.setItem('lockUntil', Date.now() + LOCK_HOURS * 3600000);
+    if (player && player.pauseVideo) player.pauseVideo();
+    checkLock();
+  }
+}
+function buyPremium() {
+  // Pagamento ainda simulado. Depois ligamos um pagamento real.
+  if (confirm('Simulação: confirmar compra de R$ 34,90?')) {
+    localStorage.setItem('premium', '1');
+    localStorage.removeItem('lockUntil');
+    location.reload();
+  }
+}
+
+/* ===== BUSCA ===== */
+async function searchVideos() {
+  const q = document.getElementById('q').value.trim();
+  if (!q) return;
+  const url = 'https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=8&q=' + encodeURIComponent(q) + '&key=' + YT_API_KEY;
+  const box = document.getElementById('results');
+  box.innerHTML = 'Pesquisando...';
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    box.innerHTML = '';
+    if (data.error) { box.innerHTML = 'Erro na busca: ' + data.error.message; return; }
+    (data.items || []).forEach(v => {
+      const d = document.createElement('div');
+      d.className = 'result';
+      d.innerHTML = '<img src="' + v.snippet.thumbnails.default.url + '"><div>' + v.snippet.title + '</div>';
+      d.onclick = () => chooseVideo(v.id.videoId);
+      box.appendChild(d);
+    });
+  } catch (e) { box.innerHTML = 'Erro de conexão.'; }
+}
+
+/* ===== VÍDEO E TRANSCRIÇÃO ===== */
+async function chooseVideo(id) {
+  document.getElementById('playCard').classList.remove('hidden');
+  document.getElementById('typeBox').classList.add('hidden');
+  setMsg('Carregando transcrição...', '');
+  try {
+    const res = await fetch(TRANSCRIPT_API + id);
+    transcript = await res.json();
+  } catch (e) { transcript = []; }
+  if (!transcript.length) { setMsg('Este vídeo não tem transcrição em inglês disponível. Escolha outro.', 'bad'); return; }
+  segIndex = 0;
+  document.getElementById('player').outerHTML = '<div id="player"></div>';
+  player = new YT.Player('player', {
+    videoId: id,
+    playerVars: { controls: 0, rel: 0 },
+    events: { onReady: () => playSegment() }
+  });
+}
+function transcriptBetween(a, b) {
+  return transcript.filter(t => t.start >= a && t.start < b).map(t => t.text).join(' ').trim();
+}
+function playSegment() {
+  const last = transcript[transcript.length - 1].start;
+  let start = segIndex * SEGMENT_SECONDS;
+  let expected = transcriptBetween(start, start + SEGMENT_SECONDS);
+  while (!expected && start <= last) { segIndex++; start = segIndex * SEGMENT_SECONDS; expected = transcriptBetween(start, start + SEGMENT_SECONDS); }
+  if (!expected) { setMsg('Fim do vídeo! 🎉', 'ok'); document.getElementById('typeBox').classList.add('hidden'); return; }
+  document.getElementById('typeBox').classList.add('hidden');
+  setMsg('', '');
+  player.seekTo(start, true);
+  player.playVideo();
+  clearTimeout(pauseTimer);
+  pauseTimer = setTimeout(() => {
+    player.pauseVideo();
+    document.getElementById('typeBox').classList.remove('hidden');
+    const a = document.getElementById('answer'); a.value = ''; a.focus();
+  }, SEGMENT_SECONDS * 1000);
+}
+
+/* ===== CONFERÊNCIA ===== */
+const norm = s => s.toLowerCase().replace(/[^a-z0-9' ]/g, '').replace(/\s+/g, ' ').trim();
+function checkAnswer() {
+  const start = segIndex * SEGMENT_SECONDS;
+  const expectedRaw = transcriptBetween(start, start + SEGMENT_SECONDS);
+  const expected = norm(expectedRaw);
+  const typed = norm(document.getElementById('answer').value);
+  document.getElementById('typeBox').classList.add('hidden');
+  if (typed === expected) {
+    setMsg('Congratulations! 🎉', 'ok');
+    const m = document.getElementById('msg'); m.classList.add('pop'); confetti();
+    segIndex++;
+    setTimeout(() => { m.classList.remove('pop'); playSegment(); }, 1800);
+  } else {
+    setMsg('Errou! O correto era: ' + expectedRaw, 'bad');
+    const c = document.getElementById('playCard'); c.classList.add('shake');
+    setTimeout(() => c.classList.remove('shake'), 400);
+    loseLife();
+    segIndex++;
+    setTimeout(() => { if (!checkLock()) playSegment(); }, 3500);
+  }
+}
+function setMsg(t, cls) { const m = document.getElementById('msg'); m.textContent = t; m.className = cls; }
+function confetti() {
+  const colors = ['#f59e0b','#10b981','#3b82f6','#ec4899','#8b5cf6'];
+  for (let i = 0; i < 60; i++) {
+    const c = document.createElement('div');
+    c.className = 'confetti';
+    c.style.left = Math.random() * 100 + 'vw';
+    c.style.background = colors[i % colors.length];
+    c.style.animationDelay = Math.random() * .4 + 's';
+    document.body.appendChild(c);
+    setTimeout(() => c.remove(), 2200);
+  }
+}
+document.addEventListener('keydown', e => { if (e.key === 'Enter' && !document.getElementById('typeBox').classList.contains('hidden')) checkAnswer(); });
+
+renderHearts();
+checkLock();
+</script>
+</body>
+</html>
